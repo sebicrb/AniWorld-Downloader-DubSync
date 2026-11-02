@@ -812,6 +812,23 @@ function dsUpdateSummary() {
   btn.disabled = nEp + nMov === 0;
 }
 
+// ===== Mode (add / new try / erase) =====
+
+function dsMode() {
+  const checked = document.querySelector('input[name="dsMode"]:checked');
+  return checked ? checked.value : "add";
+}
+
+// Erase downloads nothing, so the timing/output options don't apply.
+function dsModeChanged() {
+  const erase = dsMode() === "erase";
+  const opts = document.getElementById("dsSyncOptions");
+  opts.style.opacity = erase ? "0.4" : "";
+  opts.style.pointerEvents = erase ? "none" : "";
+  opts.querySelectorAll("input").forEach((el) => (el.disabled = erase));
+  document.getElementById("dsEraseWhich").style.display = erase ? "" : "none";
+}
+
 // ===== Enqueue =====
 
 async function dsEnqueue() {
@@ -819,6 +836,17 @@ async function dsEnqueue() {
   const episodes = dsSelectedEpisodes();
   const pairs = dsSelectedMovies();
   if (!dsShow || !folder || (!episodes.length && !pairs.length)) return;
+
+  if (
+    dsMode() === "erase" &&
+    !confirm(
+      dsT(
+        "dubsync.erase_confirm",
+        "Remove the DubSync tracks from the selected files? This edits the files directly."
+      )
+    )
+  )
+    return;
 
   const btn = document.getElementById("dsEnqueueBtn");
   btn.disabled = true;
@@ -834,6 +862,8 @@ async function dsEnqueue() {
         allow_resample: document.getElementById("dsAllowResample").checked,
         cleanup: document.getElementById("dsCleanup").checked,
         recursive: document.getElementById("dsRecursive").checked,
+        mode: dsMode(),
+        erase_which: document.getElementById("dsEraseWhich").value,
         episodes: episodes,
         pairs: pairs,
       }),

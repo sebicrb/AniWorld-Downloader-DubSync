@@ -1,5 +1,9 @@
 """DubSync pipeline: match -> preflight -> extract -> align -> remux -> cleanup.
 
+Three modes: ``add`` (default) skips files that already carry the dub
+language, ``retry`` grafts another, separately titled track next to an
+existing one ("new try"), ``erase`` strips the tracks DubSync added.
+
 Orchestrates grafting a German dub (from an AniWorld/SerienStream source) onto a
 folder of archive-quality video files. The dub's offset against each target is
 detected automatically per episode (:mod:`align`); a manual ``offset`` overrides
@@ -18,10 +22,27 @@ from typing import Iterable, List, Optional, Tuple
 
 from ....config import LANG_CODE_MAP, LANG_KEY_MAP, LANG_LABELS, logger
 from ...common.common import check_downloaded
-from .align import DEFAULT_MIN_CONFIDENCE, detect_offset, resample_dub
+from .align import DEFAULT_MIN_CONFIDENCE, detect_offset, render_dub
 from .extract import extract_dub_audio
 from .matcher import MatchReport, match_directory
-from .remux import remux_with_dub
+from .remux import (
+    _audio_streams,
+    dubsync_track_title,
+    find_dubsync_tracks,
+    next_try_number,
+    remux_with_dub,
+    strip_audio_tracks,
+)
+
+#: ``add``: skip files that already have the dub language; ``retry``: graft
+#: another track anyway; ``erase``: remove DubSync's tracks, download nothing.
+MODES = ("add", "retry", "erase")
+
+#: Which DubSync tracks erase removes. The newest is the one appended last
+#: (highest audio index) -- i.e. the latest "new try".
+#: ``all``; ``older`` keeps the newest (the new try won); ``newest`` drops
+#: only the newest (the new try lost).
+ERASE_WHICH = ("all", "older", "newest")
 
 
 def dubsync_env_defaults() -> dict:
@@ -114,15 +135,16 @@ def _align_dub(
     allow_resample: bool,
     min_confidence: float,
 ) -> Tuple[float, Path, str]:
-    """Detect the dub's offset against *target* and handle drift.
+    """Detect the dub's offset against *target*, handling drift and cuts.
 
     Returns ``(offset, dub_path, note)`` -- *dub_path* differs from *dub_tmp*
-    only when drift correction re-timed the dub into a new temp file. *note*
-    describes what alignment decided (kept in the outcome detail so
-    low-confidence fallbacks are visible in the final report).
+    only when the dub was re-rendered (tempo corrected and/or re-assembled
+    around act-break cuts) into a new temp file. *note* describes what
+    alignment decided (kept in the outcome detail so low-confidence
+    fallbacks are visible in the final report).
     """
 
-    result = detect_offset(dub_tmp, target)
+    result = detect_offset(dub_tmp, target, find_cuts=True)
 
     if result.confidence < min_confidence:
         note = (
@@ -132,23 +154,47 @@ def _align_dub(
         logger.warning(f"[DUBSYNC] {target.name}: {note}")
         return 0.0, dub_tmp, note
 
-    if result.has_drift:
-        if allow_resample and result.drift_confidence >= min_confidence:
-            retimed = dub_tmp.with_name(f"{dub_tmp.stem}.retimed.mka")
-            resample_dub(
-                dub_tmp, retimed, result.tempo_ratio, label=target.stem
-            )
-            note = (
-                f"offset {result.post_tempo_offset:+.2f}s; drift "
-                f"{result.drift:+.2f}s corrected via atempo="
-                f"{result.tempo_ratio:.5f} (dub re-encoded)"
-            )
-            return result.post_tempo_offset, retimed, note
+    cuts = len(result.segments) - 1 if result.has_cuts else 0
+    drift_ok = result.has_drift and result.drift_confidence >= min_confidence
+
+    fixes = []
+    if drift_ok:
+        fixes.append(
+            f"drift {result.drift:+.2f}s via atempo={result.tempo_ratio:.5f}"
+        )
+    if cuts:
+        jumps = ", ".join(
+            f"{b.shift - a.shift:+.2f}s@{b.start / 60:.0f}m"
+            for a, b in zip(result.segments, result.segments[1:])
+        )
+        fixes.append(f"{cuts} cut(s) bridged ({jumps})")
+
+    if fixes and allow_resample:
+        rendered = dub_tmp.with_name(f"{dub_tmp.stem}.retimed.mka")
+        render_dub(
+            dub_tmp,
+            rendered,
+            result.tempo_ratio if drift_ok else 1.0,
+            result.segments if cuts else None,
+            label=target.stem,
+        )
+        offset = (
+            result.segments[0].shift
+            if result.segments
+            else (result.post_tempo_offset if drift_ok else result.offset)
+        )
         note = (
-            f"offset {result.offset:+.2f}s (z={result.confidence:.1f}); drift "
-            f"{result.drift:+.2f}s detected but resample "
-            + ("low-confidence" if allow_resample else "disabled")
-            + " - sync may wander over the episode"
+            f"offset {offset:+.2f}s (z={result.confidence:.1f}); "
+            + "; ".join(fixes)
+            + " (dub re-encoded)"
+        )
+        return offset, rendered, note
+
+    if fixes:
+        note = (
+            f"offset {result.offset:+.2f}s (z={result.confidence:.1f}); needs "
+            + "; ".join(fixes)
+            + " but speed/cut fixing is disabled - sync will wander"
         )
         logger.warning(f"[DUBSYNC] {target.name}: {note}")
         return result.offset, dub_tmp, note
@@ -176,19 +222,22 @@ def _dry_run_align(
             extract_dub_audio(
                 episode, dub_tmp, audio_language=audio_language, label=target.stem
             )
-            result = detect_offset(dub_tmp, target)
+            result = detect_offset(dub_tmp, target, find_cuts=True)
             line = f"offset {result.offset:+.3f}s  (z={result.confidence:.1f})"
             if result.confidence < min_confidence:
                 line += "  LOW CONFIDENCE - would fall back to 0"
-            elif result.has_drift:
-                line += (
-                    f"  drift {result.drift:+.2f}s"
-                    + (
-                        f" -> atempo={result.tempo_ratio:.5f}"
-                        if allow_resample
-                        else " (resample disabled)"
+            else:
+                if result.has_drift:
+                    line += f"  drift {result.drift:+.2f}s"
+                    if allow_resample:
+                        line += f" -> atempo={result.tempo_ratio:.5f}"
+                if result.has_cuts:
+                    line += f"  {len(result.segments) - 1} cut(s): " + ", ".join(
+                        f"{b.shift - a.shift:+.2f}s@{b.start:.0f}s"
+                        for a, b in zip(result.segments, result.segments[1:])
                     )
-                )
+                if (result.has_drift or result.has_cuts) and not allow_resample:
+                    line += " (speed/cut fixing disabled)"
             print(f"    {target.name}: {line}")
         except Exception as exc:  # noqa: BLE001 - keep probing the rest
             print(f"    {target.name}: FAILED ({exc})")
@@ -209,6 +258,41 @@ def _print_summary(outcomes: List[FileOutcome]) -> None:
     print()
 
 
+def _erase_tracks(pairs, audio_code: str, which: str = "all") -> List[FileOutcome]:
+    """Erase mode: strip DubSync's tracks from every matched file in place
+    (*which*: see :data:`ERASE_WHICH`)."""
+
+    outcomes: List[FileOutcome] = []
+    for pf, _episode in pairs:
+        target = pf.path
+        try:
+            tracks = find_dubsync_tracks(target, audio_code)
+            if which == "older":
+                tracks = tracks[:-1]
+            elif which == "newest":
+                tracks = tracks[-1:]
+            if not tracks:
+                outcomes.append(
+                    FileOutcome(
+                        target,
+                        "skipped",
+                        "no DubSync track to erase"
+                        + (" (only one present, kept)" if which == "older" else ""),
+                    )
+                )
+                continue
+            strip_audio_tracks(target, tracks, label=target.stem)
+            detail = f"removed {len(tracks)} track(s): " + ", ".join(
+                f"a:{i}" for i in tracks
+            )
+            logger.info(f"[DUBSYNC] erased: {target.name} ({detail})")
+            outcomes.append(FileOutcome(target, "done", detail))
+        except Exception as exc:  # noqa: BLE001 - report per-file, keep going
+            logger.warning(f"[DUBSYNC] erase failed for {target.name}: {exc}")
+            outcomes.append(FileOutcome(target, "failed", str(exc)))
+    return outcomes
+
+
 def run_dubsync(
     source,
     target_dir,
@@ -218,6 +302,8 @@ def run_dubsync(
     dry_run: bool = False,
     cleanup: bool = False,
     overwrite: bool = False,
+    mode: str = "add",
+    erase_which: str = "all",
     auto_align: bool = True,
     allow_resample: bool = False,
     min_confidence: float = DEFAULT_MIN_CONFIDENCE,
@@ -239,10 +325,17 @@ def run_dubsync(
             per-episode offsets) without writing to any target file.
         cleanup: edit files in place (temp + atomic replace) instead of writing
             a ``*.dubsync.<ext>`` sidecar copy.
-        overwrite: re-graft even if the target already carries the dub language.
+        overwrite: legacy alias for ``mode="retry"``.
+        mode: ``add`` skips files that already carry the dub language;
+            ``retry`` grafts another, separately titled track next to any
+            existing one; ``erase`` removes the tracks DubSync added (always
+            in place, nothing is downloaded).
+        erase_which: for ``erase``: ``all`` DubSync tracks, ``older`` (keep
+            the newest try) or ``newest`` (drop only the newest try).
         auto_align: detect each episode's offset via music/SFX-bed correlation.
-        allow_resample: when linear drift is detected (e.g. PAL-sourced dub),
-            correct it with ``atempo`` -- this re-encodes the dub track only.
+        allow_resample: when linear drift (e.g. PAL-sourced dub) or
+            act-break cuts are detected, re-render the dub with ``atempo``
+            and silence padded into the cuts -- re-encodes the dub track only.
         min_confidence: correlation peak z-score below which a detection is
             discarded in favour of offset 0 (and flagged in the report).
         selected: restrict the run to these ``(season, episode)`` keys
@@ -252,6 +345,15 @@ def run_dubsync(
 
     Returns ``(match_report, outcomes)``.
     """
+
+    if overwrite and mode == "add":
+        mode = "retry"
+    if mode not in MODES:
+        raise ValueError(f"unknown DubSync mode {mode!r} (expected one of {MODES})")
+    if erase_which not in ERASE_WHICH:
+        raise ValueError(
+            f"unknown erase selection {erase_which!r} (expected one of {ERASE_WHICH})"
+        )
 
     report = match_directory(
         target_dir, source, recursive=recursive, selected=selected, explicit=explicit
@@ -284,13 +386,18 @@ def run_dubsync(
         logger.info("[DUBSYNC] nothing to do (no matched files)")
         return report, outcomes
 
+    if mode == "erase":
+        outcomes = _erase_tracks(report.pairs, audio_code, erase_which)
+        _print_summary(outcomes)
+        return report, outcomes
+
     tmp_dir = Path(tempfile.mkdtemp(prefix="dubsync_"))
     try:
         for pf, episode in report.pairs:
             target = pf.path
             try:
                 check = check_downloaded(target)
-                if audio_code in check["audio_langs"] and not overwrite:
+                if audio_code in check["audio_langs"] and mode == "add":
                     logger.info(
                         f"[DUBSYNC] skip (already has '{audio_code}'): {target.name}"
                     )
@@ -320,6 +427,7 @@ def run_dubsync(
                 else:
                     out = target.with_name(f"{target.stem}.dubsync{target.suffix}")
 
+                number = next_try_number(_audio_streams(target), audio_code)
                 remux_with_dub(
                     target,
                     dub_path,
@@ -327,6 +435,7 @@ def run_dubsync(
                     offset=use_offset,
                     audio_code=audio_code,
                     label=target.stem,
+                    title=dubsync_track_title(audio_language, number),
                 )
 
                 if dub_path != dub_tmp:

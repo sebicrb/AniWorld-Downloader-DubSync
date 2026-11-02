@@ -128,12 +128,22 @@ aniworld https://aniworld.to/anime/stream/<series>/staffel-1 \
   verification. Use `--dubsync-offset <seconds>` to force a manual offset.
   See [docs/dubsync-alignment.md](docs/dubsync-alignment.md) for how the
   alignment algorithm works.
-- **Drift correction** – PAL-sourced dubs run ~4% fast, which a constant offset
-  can't fix. `--dubsync-allow-resample` corrects the drift with `atempo`
-  (re-encodes only the dub track; opt-in because it sacrifices bit-exactness).
+- **Drift and cut correction** – PAL-sourced dubs run ~4% fast, and TV
+  versions drop a few seconds at every act break, which a constant offset
+  can't fix. `--dubsync-allow-resample` slows the dub with `atempo` and pads
+  silence into each cut (re-encodes only the dub track; opt-in because it
+  sacrifices bit-exactness).
 - **In-place mode** – `--dubsync-cleanup` replaces the originals
   (temp + atomic swap) instead of writing `.dubsync.mkv` copies.
-- Files that already carry the dub language are skipped automatically; matching
+- **New try / erase** – `--dubsync-mode retry` grafts another dub track next
+  to an existing one (titled `German Dub (DubSync #2)`, …) so both can be
+  compared; `--dubsync-mode erase` removes DubSync's tracks again (in place,
+  nothing downloaded), with `--dubsync-erase all|older|newest` to drop all of
+  them, keep only the newest try, or drop just the newest. Tracks from older
+  runs without a title are recognised as untitled `deu` tracks that aren't the
+  file's first audio track. The same three modes are in the Web UI.
+- By default (`--dubsync-mode add`), files that already carry the dub language
+  are skipped automatically; matching
   handles common scene/Blu-ray naming (`Show - 01`, `S01E01`, `01v2`, …) and
   reports unmatched files instead of guessing.
 - Also available in the Web UI: the **DubSync** tab lets you browse to your

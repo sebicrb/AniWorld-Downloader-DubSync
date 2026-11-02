@@ -137,6 +137,43 @@ endblock %} {% block content %}
     </div>
 
     <div class="ds-opt">
+      <div class="ds-opt-label" style="cursor: default">
+        <span data-i18n="dubsync.mode">What to do</span>
+      </div>
+      <label class="ds-opt-label" style="margin-top: 8px">
+        <input type="radio" name="dsMode" value="add" checked onchange="dsModeChanged()" style="accent-color: #2563eb; cursor: pointer" />
+        <span data-i18n="dubsync.mode_add">Add German dub</span>
+      </label>
+      <div class="settings-hint" data-i18n="dubsync.mode_add_desc">
+        Files that already have a German track are skipped.
+      </div>
+      <label class="ds-opt-label" style="margin-top: 8px">
+        <input type="radio" name="dsMode" value="retry" onchange="dsModeChanged()" style="accent-color: #2563eb; cursor: pointer" />
+        <span data-i18n="dubsync.mode_retry">New try — add another German track</span>
+      </label>
+      <div class="settings-hint" data-i18n="dubsync.mode_retry_desc">
+        For files whose dub came out of sync: grafts a fresh track next to the
+        existing one (titled "DubSync #2", …), so you can compare both and
+        then erase the worse one.
+      </div>
+      <label class="ds-opt-label" style="margin-top: 8px">
+        <input type="radio" name="dsMode" value="erase" onchange="dsModeChanged()" style="accent-color: #dc2626; cursor: pointer" />
+        <span data-i18n="dubsync.mode_erase">Erase DubSync tracks</span>
+      </label>
+      <div class="settings-hint" data-i18n="dubsync.mode_erase_desc">
+        Removes German tracks DubSync added from the selected files, directly
+        in the files. Your original audio and any German track that came with
+        the release stay. Nothing is downloaded.
+      </div>
+      <select id="dsEraseWhich" class="sync-select" style="max-width: 420px; margin: 8px 0 0 24px; display: none">
+        <option value="all" data-i18n="dubsync.erase_all">All DubSync tracks</option>
+        <option value="older" data-i18n="dubsync.erase_older">Older ones — keep the newest try</option>
+        <option value="newest" data-i18n="dubsync.erase_newest">Only the newest try</option>
+      </select>
+    </div>
+
+    <div id="dsSyncOptions">
+    <div class="ds-opt">
       <label class="ds-opt-label">
         <input type="checkbox" id="dsAutoAlign" />
         <span data-i18n="dubsync.auto_align">Fix timing automatically (recommended)</span>
@@ -150,12 +187,12 @@ endblock %} {% block content %}
     <div class="ds-opt">
       <label class="ds-opt-label">
         <input type="checkbox" id="dsAllowResample" />
-        <span data-i18n="dubsync.allow_resample">Fix wrong playback speed</span>
-        <span class="ds-help" data-i18n-title="dubsync.allow_resample_tip" title="Dubs taken from TV broadcasts sometimes run about 4% too fast. Fixing that means the dub track is converted once — your video and its original audio are never touched. Only kicks in when a speed difference is actually found.">?</span>
+        <span data-i18n="dubsync.allow_resample">Fix wrong speed and cut scenes (recommended for TV shows)</span>
+        <span class="ds-help" data-i18n-title="dubsync.allow_resample_tip" title="Dubs taken from TV broadcasts often run about 4% too fast, and the German TV cut drops 2–3 seconds at each act break. With this on, DubSync slows the dub to the right speed and pads silence into each cut. Only the dub track is converted.">?</span>
       </label>
       <div class="settings-hint" data-i18n="dubsync.allow_resample_desc">
-        Some dubs run slightly too fast; this slows the dub down to match your
-        video.
+        Some dubs run slightly too fast, and TV versions miss a few seconds at
+        every ad break; this corrects both.
       </div>
     </div>
 
@@ -180,6 +217,7 @@ endblock %} {% block content %}
       <div class="settings-hint" style="margin-left: 0" data-i18n="dubsync.offset_desc">
         Leave empty — the timing is worked out automatically.
       </div>
+    </div>
     </div>
 
     <div class="settings-row" style="margin-top: 22px; align-items: center; gap: 14px">

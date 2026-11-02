@@ -514,10 +514,21 @@ def _run_dubsync_queue_item(item):
         ),
         selected=selected,
         explicit=explicit,
+        mode=job.get("mode") or "add",
+        erase_which=job.get("erase_which") or "all",
     )
 
     failed = [o for o in outcomes if o.status == "failed"]
     errors = [{"url": str(o.path), "error": o.detail} for o in failed]
+    # Completed files whose sync is known to be off (alignment fell back to 0,
+    # or drift/cuts were found but fixing is disabled) -- surfaced in the
+    # queue so they get checked instead of silently shipping out of sync.
+    errors += [
+        {"url": str(o.path), "error": "warning: " + o.detail}
+        for o in outcomes
+        if o.status == "done"
+        and ("verify manually" in o.detail or "sync will wander" in o.detail)
+    ]
     if not report.pairs:
         errors.append(
             {
@@ -529,7 +540,9 @@ def _run_dubsync_queue_item(item):
         update_queue_errors(item["id"], json.dumps(errors))
 
     update_queue_progress(item["id"], 1, "")
-    all_failed = bool(errors) and (not outcomes or len(failed) == len(outcomes))
+    all_failed = (not outcomes and bool(errors)) or (
+        bool(outcomes) and len(failed) == len(outcomes)
+    )
     set_queue_status(item["id"], "failed" if all_failed else "completed")
 
 
@@ -2123,6 +2136,13 @@ def create_app(auth_enabled=False, sso_enabled=False, force_sso=False):
             except ValueError:
                 return jsonify({"error": f"Invalid offset: {raw_offset}"}), 400
 
+        mode = str(data.get("mode") or "add").strip().lower()
+        if mode not in ("add", "retry", "erase"):
+            return jsonify({"error": f"Invalid mode: {mode}"}), 400
+        erase_which = str(data.get("erase_which") or "all").strip().lower()
+        if erase_which not in ("all", "older", "newest"):
+            return jsonify({"error": f"Invalid erase_which: {erase_which}"}), 400
+
         # Optional episode restriction from the DubSync page's checklist:
         # a list of [season, episode] pairs. May be empty when the job is
         # movie-only (pairs below carry the work instead).
@@ -2176,6 +2196,8 @@ def create_app(auth_enabled=False, sso_enabled=False, force_sso=False):
             "recursive": bool(data.get("recursive", False)),
             "episodes": selected,
             "pairs": pairs,
+            "mode": mode,
+            "erase_which": erase_which,
         }
 
         username = None
@@ -2196,8 +2218,9 @@ def create_app(auth_enabled=False, sso_enabled=False, force_sso=False):
         slug = re.sub(r"\.html?$", "", slug)
         slug = re.sub(r"^\d+-", "", slug)
         slug = slug.replace("-", " ").title()
+        mode_label = {"retry": " (new try)", "erase": " (erase)"}.get(mode, "")
         queue_id = add_to_queue(
-            f"DubSync: {slug}",
+            f"DubSync{mode_label}: {slug}",
             url,
             [job],
             defaults["audio_language"],

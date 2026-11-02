@@ -152,6 +152,21 @@
       "dubsync.local_file": "Local file: ",
       "dubsync.unpaired": "local file(s) have no matching episode: ",
       "dubsync.unparsed_note": "Not recognised: ",
+      "dubsync.mode": "What to do",
+      "dubsync.mode_add": "Add German dub",
+      "dubsync.mode_add_desc":
+        "Files that already have a German track are skipped.",
+      "dubsync.mode_retry": "New try — add another German track",
+      "dubsync.mode_retry_desc":
+        "For files whose dub came out of sync: grafts a fresh track next to the existing one (titled \"DubSync #2\", …), so you can compare both and then erase the worse one.",
+      "dubsync.mode_erase": "Erase DubSync tracks",
+      "dubsync.mode_erase_desc":
+        "Removes German tracks DubSync added from the selected files, directly in the files. Your original audio and any German track that came with the release stay. Nothing is downloaded.",
+      "dubsync.erase_all": "All DubSync tracks",
+      "dubsync.erase_older": "Older ones — keep the newest try",
+      "dubsync.erase_newest": "Only the newest try",
+      "dubsync.erase_confirm":
+        "Remove the DubSync tracks from the selected files? This edits the files directly.",
       "dubsync.step4": "4. Options",
       "dubsync.step4_hint":
         "The usual settings work for most jobs — you can just press Add to queue.",
@@ -166,11 +181,11 @@
         "Lines the dub up with your video by comparing the two soundtracks.",
       "dubsync.auto_align_tip":
         "The dub comes from a stream that may start a little earlier or later than your file. DubSync listens for the music and sound effects both versions share and shifts the dub so it lines up. If it is not confident, it leaves the timing as-is and marks the job in the queue so you can check by ear.",
-      "dubsync.allow_resample": "Fix wrong playback speed",
+      "dubsync.allow_resample": "Fix wrong speed and cut scenes (recommended for TV shows)",
       "dubsync.allow_resample_desc":
-        "Some dubs run slightly too fast; this slows the dub down to match your video.",
+        "Some dubs run slightly too fast, and TV versions miss a few seconds at every ad break; this corrects both.",
       "dubsync.allow_resample_tip":
-        "Dubs taken from TV broadcasts sometimes run about 4% too fast. Fixing that means the dub track is converted once — your video and its original audio are never touched. Only kicks in when a speed difference is actually found.",
+        "Dubs taken from TV broadcasts often run about 4% too fast, and the German TV cut drops 2–3 seconds at each act break, so a single shift can never fit the whole episode. With this on, DubSync slows the dub to the right speed and pads silence into each cut. The dub track is converted once — your video and its original audio are never touched. Only kicks in when a speed difference or cut is actually found.",
       "dubsync.cleanup": "Add the dub directly into my files",
       "dubsync.cleanup_desc":
         "When off, a new copy named *.dubsync.mkv is saved next to each file — the safe choice.",
@@ -372,6 +387,21 @@
       "dubsync.local_file": "Lokale Datei: ",
       "dubsync.unpaired": "lokale Datei(en) ohne passende Episode: ",
       "dubsync.unparsed_note": "Nicht erkannt: ",
+      "dubsync.mode": "Was soll passieren",
+      "dubsync.mode_add": "Deutschen Dub hinzufügen",
+      "dubsync.mode_add_desc":
+        "Dateien, die schon eine deutsche Spur haben, werden übersprungen.",
+      "dubsync.mode_retry": "Neuer Versuch — weitere deutsche Spur",
+      "dubsync.mode_retry_desc":
+        "Für Dateien, deren Dub asynchron ist: fügt eine frische Spur neben der vorhandenen ein (Titel „DubSync #2“, …), damit du beide vergleichen und danach die schlechtere löschen kannst.",
+      "dubsync.mode_erase": "DubSync-Spuren löschen",
+      "dubsync.mode_erase_desc":
+        "Entfernt von DubSync hinzugefügte deutsche Spuren aus den gewählten Dateien, direkt in den Dateien. Originalton und deutsche Spuren, die schon im Release waren, bleiben. Es wird nichts heruntergeladen.",
+      "dubsync.erase_all": "Alle DubSync-Spuren",
+      "dubsync.erase_older": "Ältere — neuesten Versuch behalten",
+      "dubsync.erase_newest": "Nur den neuesten Versuch",
+      "dubsync.erase_confirm":
+        "DubSync-Spuren aus den gewählten Dateien entfernen? Das ändert die Dateien direkt.",
       "dubsync.step4": "4. Optionen",
       "dubsync.step4_hint":
         "Die Voreinstellungen passen für die meisten Aufträge — du kannst einfach auf „Zur Warteschlange“ drücken.",
@@ -386,11 +416,11 @@
         "Richtet den Dub am Video aus, indem beide Tonspuren verglichen werden.",
       "dubsync.auto_align_tip":
         "Der Dub stammt aus einem Stream, der etwas früher oder später starten kann als deine Datei. DubSync achtet auf Musik und Soundeffekte, die beide Fassungen teilen, und verschiebt den Dub passend. Ist es sich nicht sicher, bleibt das Timing unverändert und der Auftrag wird in der Warteschlange markiert, damit du per Ohr prüfen kannst.",
-      "dubsync.allow_resample": "Falsche Abspielgeschwindigkeit korrigieren",
+      "dubsync.allow_resample": "Falsche Geschwindigkeit und Schnitte korrigieren (empfohlen für Serien)",
       "dubsync.allow_resample_desc":
-        "Manche Dubs laufen etwas zu schnell; das bremst den Dub passend zum Video ab.",
+        "Manche Dubs laufen etwas zu schnell, und TV-Fassungen fehlen an jeder Werbepause ein paar Sekunden; das korrigiert beides.",
       "dubsync.allow_resample_tip":
-        "Dubs aus TV-Ausstrahlungen laufen manchmal ca. 4 % zu schnell. Die Korrektur wandelt nur die Dub-Spur einmal um — dein Video und sein Originalton werden nie angefasst. Greift nur, wenn tatsächlich ein Geschwindigkeitsunterschied gefunden wird.",
+        "Dubs aus TV-Ausstrahlungen laufen oft ca. 4 % zu schnell, und die deutsche TV-Fassung verliert an jedem Akt-Ende 2–3 Sekunden, sodass eine einzige Verschiebung nie für die ganze Episode passt. Damit eingeschaltet bremst DubSync den Dub auf die richtige Geschwindigkeit und füllt jeden Schnitt mit Stille auf. Nur die Dub-Spur wird einmal umgewandelt — dein Video und sein Originalton werden nie angefasst. Greift nur, wenn tatsächlich ein Geschwindigkeitsunterschied oder Schnitt gefunden wird.",
       "dubsync.cleanup": "Dub direkt in meine Dateien einfügen",
       "dubsync.cleanup_desc":
         "Wenn aus, wird eine neue Kopie namens *.dubsync.mkv neben jeder Datei gespeichert — die sichere Wahl.",

@@ -104,6 +104,8 @@ def _run_dubsync_cli(args) -> int:
         cleanup=defaults["cleanup"],
         auto_align=defaults["auto_align"],
         allow_resample=defaults["allow_resample"],
+        mode=args.dubsync_mode,
+        erase_which=args.dubsync_erase,
     )
     return 1 if any(o.status == "failed" for o in outcomes) else 0
 

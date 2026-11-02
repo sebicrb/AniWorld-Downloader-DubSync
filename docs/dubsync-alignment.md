@@ -91,12 +91,23 @@ time-stretched by candidate speed factors and re-correlated at each one:
 * At the **true** tempo every hit snaps to the same lag and the peak becomes
   dramatically sharp.
 
-The search is hierarchical over `1 ± 6 %` (covering PAL ↔ film both ways with
-headroom): a coarse grid at step 2·10⁻³, then finer grids of 2·10⁻⁴ and
-2·10⁻⁵ around the running best — roughly a hundred correlations total, each
-against a precomputed reference FFT. The final step bounds the tempo error at
-~10⁻⁵, i.e. ~14 ms of residual drift over a 24-minute episode. On synthetic
-PAL material the scan recovers 25/23.976 to five decimal places.
+The peak is needle-thin in tempo: over a 50-minute episode a factor just
+7·10⁻⁴ off still smears it by two seconds. A coarse grid therefore steps
+straight over the true ratio on long episodes (this is what failed on a
+live-action season: z ≈ 4 on every episode, everything fell back to offset 0).
+So the scan runs in two stages:
+
+1. **Standard ratios first.** The speeds real dubs actually differ by —
+   25/23.976 and 25/24 (PAL speed-up), 24/23.976 (NTSC slip), and their
+   inverses — are each probed with a ±10⁻⁴ neighbourhood at 2·10⁻⁵ steps.
+   If one clears the guard rails below it is polished to ~10⁻⁶ and wins.
+2. **Generic grid otherwise.** Hierarchical over `1 ± 6 %`: a coarse grid,
+   then finer grids around the running best. When the identity peak is
+   already confident the coarse step is 2·10⁻³ (cheap; the true factor is
+   near 1 anyway); when it is not, the coarse step shrinks to
+   0.3 s ÷ duration so the true factor can't be stepped over.
+
+Each correlation reuses a precomputed reference FFT.
 
 Guard rails, in order:
 
@@ -113,18 +124,58 @@ When drift is confirmed, the result carries the `atempo` factor
 (`tempo_ratio = 1/detected speed`) and the residual constant offset measured
 at the winning tempo (`post_tempo_offset`).
 
-## Step 5 — Applying the result
+## Step 5 — Act-break cuts (piecewise alignment)
+
+TV versions of a show are often edited: the German broadcast cut drops a few
+seconds at every act break (typically the fade to black before an ad break).
+After tempo correction, the offset then *steps* through the episode — on
+*Animal Kingdom* S02E01: +1.03 s → +3.72 s → +5.94 s → +8.61 s → +10.97 s,
+one jump per act. No single offset fits; any constant one leaves most of the
+episode seconds out of sync.
+
+`detect_offset(..., find_cuts=True)` builds a piecewise map:
+
+1. **Chunks.** The (tempo-corrected) dub envelope is cut into 60 s chunks,
+   each correlated on its own within ±90 s of the global offset.
+2. **Runs.** Consecutive confident chunks (z ≥ 8) whose shift agrees within
+   0.12 s form a run. A lone chunk that disagrees is dropped unless its peak
+   is very sharp (z ≥ 12) — real acts span several chunks. Runs closer than
+   0.15 s are merged.
+3. **Boundaries.** Between two runs, 20 s sub-windows (2 s hop) are labelled
+   "old shift" or "new shift" when their peak is sharp. Periodic music
+   correlates at *both* shifts but only bluntly, so it stays unlabelled
+   instead of dragging the cut (a summed-correlation score alone was fooled
+   by exactly this, by ~70 s). The split that agrees with the most labels
+   bounds the cut to an interval (softened by 5 s).
+4. **Snapping.** Inside the interval, the cut goes where the patched span is
+   quietest: if the dub is missing material, the stretch of the *reference*
+   that will play against padded silence — i.e. the fade the TV cut removed;
+   if the dub has extra, the stretch of the dub that gets dropped.
+
+The result is a list of `Segment(start, end, shift)` in post-tempo dub time.
+
+## Step 6 — Applying the result
 
 * **Constant offset only** (the common case): the dub is muxed with
   `-itsoffset <offset>` and `-c copy` — fully lossless, the dub stream stays
   bit-exact.
-* **Drift detected**: correction requires `atempo`, which must decode and
-  re-encode the dub audio. Because that sacrifices bit-exactness of the dub
-  track, it only runs when the user opts in (`--dubsync-allow-resample`); the
-  re-encode goes to FLAC so no further generational loss occurs after the
-  unavoidable decode. Video and all original audio remain untouched either
-  way. Without the opt-in, the constant offset is used and the episode is
-  flagged that sync may wander.
+* **Drift and/or cuts detected**: `render_dub` re-renders the dub in one
+  ffmpeg pass — each segment is its own seeked input (splitting one decoded
+  stream would buffer the whole episode in memory), `atempo` corrects the
+  speed, `apad` inserts silence where the dub is missing material (or the
+  next segment's head is trimmed where it has extra), and `concat` joins
+  them. The first segment's shift stays the constant `-itsoffset`. This
+  decodes and re-encodes the dub (AAC 192k: the source is already a lossy
+  stream rip), so it only runs when the user opts in
+  (`--dubsync-allow-resample`, "Fix wrong speed and cut scenes" in the UI).
+  Video and all original audio remain untouched either way. Without the
+  opt-in, the constant offset is used and the job is flagged in the queue
+  that sync will wander.
+
+Measured on *Animal Kingdom* S02E01 (15 s windows, 5 s hop, ±0.1 s
+tolerance): the old constant-offset graft was in sync in 1 of 571 windows;
+the re-rendered dub in 344, with the rest too quiet to judge or isolated
+borderline peaks — none clustered at the cuts.
 
 `aniworld <url> --dubsync-target <dir> --dubsync-dry-run` runs match +
 alignment for every episode and prints the detected offsets, confidences and

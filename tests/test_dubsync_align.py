@@ -14,13 +14,20 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+import subprocess
+
 from aniworld.models.aniworld_to.dubsync.align import (
     _DECODE_RATE,
     _ENVELOPE_RATE,
     DEFAULT_MIN_CONFIDENCE,
+    Segment,
+    _find_segments,
     _onset_envelope,
+    _stretch,
+    _tempo_scan,
     _xcorr_peak,
     detect_offset,
+    render_dub,
 )
 
 def _impulse_bed(rng, duration_s: float, n_events: int = 60) -> np.ndarray:
@@ -155,3 +162,125 @@ def test_no_false_drift_on_clean_alignment(tmp_path):
     assert result.offset == pytest.approx(0.0, abs=0.05)
     assert not result.has_drift
     assert result.tempo_ratio == 1.0
+
+
+# ----- long-episode tempo + act-break cuts (envelope level) -----
+
+
+def _sparse_env(rng, duration_s: float, rate_hz: float = 0.5) -> np.ndarray:
+    """Envelope with random onset spikes (music/SFX hits) at ~rate_hz."""
+
+    n = int(duration_s * _ENVELOPE_RATE)
+    env = np.zeros(n, dtype=np.float32)
+    hits = rng.integers(0, n, int(duration_s * rate_hz))
+    env[hits] = rng.uniform(2.0, 6.0, len(hits))
+    return env
+
+
+def _noisy(rng, env: np.ndarray, level: float = 0.6) -> np.ndarray:
+    return (env + level * rng.standard_normal(len(env))).astype(np.float32)
+
+
+def test_tempo_scan_finds_pal_ratio_on_long_episode():
+    """50 minutes at PAL speed: a 2e-3 grid steps over the needle-thin peak
+    (the Animal Kingdom failure); the standard-ratio probe must land on it."""
+
+    rng = np.random.default_rng(46)
+    speed = 25 / 23.976
+    ref = _sparse_env(rng, 3000.0)
+    dub = _stretch(ref, 1 / speed)  # dub plays `speed` times too fast
+
+    factor, lag, conf = _tempo_scan(_noisy(rng, ref), _noisy(rng, dub), 60 * _ENVELOPE_RATE)
+
+    assert factor == pytest.approx(speed, abs=2e-5)
+    assert conf >= DEFAULT_MIN_CONFIDENCE
+    assert lag / _ENVELOPE_RATE == pytest.approx(0.0, abs=0.1)
+
+
+def test_find_segments_recovers_act_break_cuts():
+    """German TV cuts drop a few seconds at each act break: the dub must be
+    split there, each part carrying its own shift."""
+
+    rng = np.random.default_rng(47)
+    ref = _sparse_env(rng, 1800.0, rate_hz=1.0)
+    r = _ENVELOPE_RATE
+    # Remove 2.5 s at ref 400 s and 3.0 s at ref 1100 s from the dub.
+    dub = np.concatenate(
+        [ref[: 400 * r], ref[int(402.5 * r) : 1100 * r], ref[1103 * r :]]
+    )
+
+    # The removed seconds are the fade to black: silent in the reference.
+    ref_energy = (3.0 + 0.3 * rng.standard_normal(len(ref))).astype(np.float32)
+    ref_energy[400 * r : int(402.5 * r)] = 0.1
+    ref_energy[1100 * r : 1103 * r] = 0.1
+
+    segs = _find_segments(
+        _noisy(rng, ref), _noisy(rng, dub), 0.0, ref_energy=ref_energy
+    )
+
+    assert len(segs) == 3
+    assert [s.shift for s in segs] == pytest.approx([0.0, 2.5, 5.5], abs=0.05)
+    # Correlation only bounds the cut to a few seconds (no hits inside a
+    # fade); the reference's silent fade pins it.
+    assert segs[1].start == pytest.approx(400.0, abs=0.3)
+    assert segs[2].start == pytest.approx(1097.5, abs=0.3)
+    assert segs[-1].end is None
+
+
+def test_find_segments_single_segment_without_cuts():
+    rng = np.random.default_rng(48)
+    ref = _sparse_env(rng, 900.0)
+    pad = np.zeros(int(1.2 * _ENVELOPE_RATE), dtype=np.float32)
+    dub = np.concatenate([ref[len(pad):], pad])  # dub runs 1.2 s early
+
+    segs = _find_segments(_noisy(rng, ref), _noisy(rng, dub), 1.2 * _ENVELOPE_RATE)
+
+    assert len(segs) == 1
+    assert segs[0].shift == pytest.approx(1.2, abs=0.05)
+
+
+def _duration(path) -> float:
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "csv=p=0", str(path)],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    return float(out.strip())
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not on PATH")
+@pytest.mark.parametrize(
+    "segments, expected",
+    [
+        # dub missing 1.5 s after 5 s -> silence padded in
+        ([Segment(0.0, 5.0, 0.0), Segment(5.0, None, 1.5)], 21.5),
+        # dub has 1 s extra after 5 s -> dropped
+        ([Segment(0.0, 5.0, 0.0), Segment(5.0, None, -1.0)], 19.0),
+    ],
+)
+def test_render_dub_pads_and_trims_cuts(tmp_path, segments, expected):
+    rng = np.random.default_rng(49)
+    src = tmp_path / "dub.wav"
+    _write_wav(src, _dialogue(rng, 20.0, level=0.2))
+    out = tmp_path / "out.mka"
+
+    render_dub(src, out, 1.0, segments, acodec="flac")
+
+    assert _duration(out) == pytest.approx(expected, abs=0.1)
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not on PATH")
+def test_render_dub_retimes_then_pads(tmp_path):
+    rng = np.random.default_rng(50)
+    src = tmp_path / "dub.wav"
+    _write_wav(src, _dialogue(rng, 20.0, level=0.2))
+    out = tmp_path / "out.mka"
+    speed = 25 / 23.976
+
+    # segment times are post-tempo: the slowed dub lasts 20 * speed seconds
+    render_dub(
+        src, out, 1 / speed,
+        [Segment(0.0, 10.0, 0.0), Segment(10.0, None, 2.0)], acodec="flac",
+    )
+
+    assert _duration(out) == pytest.approx(20 * speed + 2.0, abs=0.15)

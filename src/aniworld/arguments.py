@@ -339,8 +339,9 @@ def parse_args():
         "--dubsync-allow-resample",
         action="store_true",
         help=(
-            "Correct linear drift (e.g. PAL-speed dubs) via atempo. "
-            "Re-encodes the dub track only; everything else stays lossless."
+            "Correct linear drift (e.g. PAL-speed dubs) via atempo and pad "
+            "silence into act-break cuts. Re-encodes the dub track only; "
+            "everything else stays lossless."
         ),
     )
     dubsync.add_argument(
@@ -349,6 +350,25 @@ def parse_args():
         help=(
             "Edit target files in place (temp + atomic replace) instead of "
             "writing *.dubsync.mkv copies next to them"
+        ),
+    )
+    dubsync.add_argument(
+        "--dubsync-mode",
+        choices=("add", "retry", "erase"),
+        default="add",
+        help=(
+            "add: skip files that already have the dub language (default); "
+            "retry: graft another, separately titled dub track as a new try; "
+            "erase: remove the tracks DubSync added (in place, no download)"
+        ),
+    )
+    dubsync.add_argument(
+        "--dubsync-erase",
+        choices=("all", "older", "newest"),
+        default="all",
+        help=(
+            "With --dubsync-mode erase: remove all DubSync tracks (default), "
+            "the older ones (keep the newest try), or only the newest try"
         ),
     )
     dubsync.add_argument(
